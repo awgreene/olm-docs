@@ -1,6 +1,6 @@
 ---
-title: "Shipping an operator that includes Admission Webhooks"
-linkTitle: "Admission Webhooks"
+title: "Shipping an operator that includes Admission Webhooks and/or CRD Conversion Webhooks"
+linkTitle: "Admission and CRD Conversion Webhooks"
 weight: 3
 ---
 
@@ -70,3 +70,83 @@ Additionally, in an attempt to prevent operator from configuring the cluster int
 - Intercept requests that target all groups
 - Intercept requests that target the `operators.coreos.com` group
 - Intercept requests that target the `ValidatingWebhookConfigurations` or `MutatingWebhookConfigurations` resources
+
+### Conversion Webhook support
+
+OLM can now also support AllNamespace Operators which ship with [CRD Conversion](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/#webhook-conversion) Webhooks. 
+To leverage this feature for one or more CRDs, the CRD names can be listed under the `conversionCRDs` field inside the `webhookdefinitions` in `ClusterServiceVersion`.
+
+For your convenience, an example is provided below:
+
+```yaml
+...
+...
+...
+spec:
+  webhookdefinitions:
+  - generateName: example.webhook.com
+    type: ValidatingAdmissionWebhook
+    deploymentName: "example-webhook-deployment"
+    containerPort: 443
+    sideEffects: "None"
+    failurePolicy: "Ignore"
+    admissionReviewVersions:
+    - "v1"
+    - "v1beta1"
+    rules:
+    - operations:
+      - "CREATE"
+      apiGroups:
+      - ""
+      apiVersions:
+      - "v1"
+      resources:
+      - "configmaps"
+    objectSelector:
+      foo: bar
+    webhookPath: "/validate"
+    conversionCRDs: 
+    - "crontabs.stable.example.com"
+...
+...
+...
+  installModes:
+  - supported: false
+    type: OwnNamespace
+  - supported: false
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+...
+...
+...
+```
+
+Please refer to the implementation of the [custom resource conversion webhook server](https://github.com/kubernetes/kubernetes/blob/v1.15.0/test/images/crd-conversion-webhook/main.go) as an example on how to write a conversion webhook server. 
+
+The CRDs will need to specify the `spec.conversion.strategy` as `Webhook` and also provide the `spec.conversion.webhook.clientconfig.service.path` where the server would be serving the traffic for conversion webhook requests. The service `name` and `namespace` can be set to be any sample strings as OLM will replace these fields to match that of the service it creates. 
+
+An example of the `spec.conversion` can be found below: 
+```
+...
+...
+...
+  conversion:
+    strategy: Webhook
+    webhookClientConfig:
+      service:
+        namespace: default
+        name: example-webhook-name
+        path: /crdconvert 
+...
+...
+...
+```
+For more information about defining Conversion Webhook CRDs, please refer to [Configure CustomResourceDefinition to use conversion webhooks](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/#configure-customresourcedefinition-to-use-conversion-webhooks)
+
+OLM requires that you:
+- define these CRDs under spec.customresourcedefinitions.owned in `ClusterServiceVersion`.  
+- provide these CRDs in the Operator Bundle.
+- try to leverage this feature only for AllNamespace Operators or else the CSV installation will fail.
